@@ -1,0 +1,489 @@
+<title>จับเวลาจานมิเตอร์</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans+Thai:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: one column instrument panel — settings, live stage, readout. Cards only for the stage and readout. */
+:root {
+  --bg: #eef1ef; --panel: #f9faf9; --ink: #16201d; --muted: #5a6763; --line: #cfd7d3;
+  --accent: #c2361f; --accent-ink: #ffffff; --steel: #2f6f62; --good: #2c7a4b; --warn: #a3620a;
+  --signal: #2f6f62; --stage: #0d1311;
+  --f-display: "Chakra Petch", "IBM Plex Sans Thai", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans Thai", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1513; --panel: #161e1b; --ink: #e3eae7; --muted: #95a39e; --line: #2a3632;
+  --accent: #ff6a4d; --accent-ink: #1a0905; --steel: #6cc3ad; --good: #5fcf8a; --warn: #f0b04a;
+  --signal: #6cc3ad; --stage: #050807; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0f1513; --panel: #161e1b; --ink: #e3eae7; --muted: #95a39e; --line: #2a3632;
+  --accent: #ff6a4d; --accent-ink: #1a0905; --steel: #6cc3ad; --good: #5fcf8a; --warn: #f0b04a;
+  --signal: #6cc3ad; --stage: #050807; color-scheme: dark }
+
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.55; }
+.wrap { max-width: 760px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 20px 48px; display: grid; gap: 28px; }
+header { display: flex; align-items: center; gap: 14px; }
+.disk { width: 44px; height: 44px; flex: none; border-radius: 50%; border: 2px solid var(--ink); position: relative; background: var(--panel); }
+.disk::after { content: ""; position: absolute; top: 3px; left: 50%; width: 4px; height: 12px; margin-left: -2px; background: var(--accent); border-radius: 1px; transform-origin: 2px 19px; animation: spin 3.2s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .disk::after { animation: none; } }
+h1 { font-family: var(--f-display); font-size: 1.7rem; line-height: 1.15; margin: 0; text-wrap: balance; }
+header p { margin: 2px 0 0; color: var(--muted); font-size: .9rem; }
+h2 { font-family: var(--f-display); font-size: 1.15rem; margin: 0 0 12px; display: flex; align-items: baseline; gap: 10px; }
+h2 .step { font-family: var(--f-mono); font-size: .75rem; color: var(--accent); letter-spacing: .06em; }
+.label { font-size: .78rem; letter-spacing: .04em; color: var(--muted); }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; }
+.field { display: grid; gap: 6px; min-width: 0; }
+.field small { color: var(--muted); font-size: .78rem; }
+input[type=number], select { font: 500 1rem var(--f-mono); padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); width: 100%; box-sizing: border-box; font-variant-numeric: tabular-nums; }
+input:focus-visible, button:focus-visible, select:focus-visible, .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { font: 500 .85rem var(--f-mono); padding: 5px 10px; border: 1px solid var(--line); border-radius: 999px; background: transparent; color: var(--ink); cursor: pointer; }
+.chip[aria-pressed=true] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.inline input { width: 90px; }
+button { font-family: var(--f-body); }
+.btn { font-weight: 600; font-size: .92rem; padding: 9px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); cursor: pointer; }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.readout { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.cell { background: var(--panel); padding: 12px 14px; display: grid; gap: 2px; min-width: 0; }
+.val { font: 600 1.45rem var(--f-mono); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.val .u { font-size: .8rem; font-weight: 400; color: var(--muted); margin-left: 4px; }
+.sub { font: .8rem var(--f-mono); color: var(--muted); }
+.cell.key .val { color: var(--accent); }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 14px; overflow-x: auto; }
+.tab { font: 600 .9rem var(--f-body); padding: 9px 12px; border: 0; border-bottom: 2px solid transparent; background: none; color: var(--muted); cursor: pointer; white-space: nowrap; }
+.tab[aria-selected=true] { color: var(--ink); border-bottom-color: var(--accent); }
+.stage { position: relative; background: var(--stage); border-radius: 8px; overflow: hidden; touch-action: none; max-width: 100%; }
+.stage video { display: block; width: 100%; height: auto; max-height: 60vh; object-fit: contain; }
+.stage canvas.overlay { position: absolute; inset: 0; width: 100%; height: 100%; cursor: crosshair; }
+.stage .empty { color: #b9c4c0; padding: 48px 16px; text-align: center; font-size: .9rem; }
+.spark { width: 100%; height: 70px; display: block; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; }
+.status { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: .85rem; }
+.pill { font: 500 .78rem var(--f-mono); padding: 3px 9px; border-radius: 999px; border: 1px solid currentColor; }
+.pill.ok { color: var(--good); } .pill.warn { color: var(--warn); } .pill.idle { color: var(--muted); } .pill.hot { color: var(--accent); }
+.note { font-size: .85rem; color: var(--muted); max-width: 65ch; }
+.note b { color: var(--ink); font-weight: 600; }
+.tap { width: 100%; padding: 34px 16px; font: 700 1.3rem var(--f-display); border-radius: 10px; border: 2px solid var(--accent); background: var(--panel); color: var(--accent); cursor: pointer; user-select: none; -webkit-user-select: none; }
+.tap:active { background: var(--accent); color: var(--accent-ink); }
+.laps { font: .85rem var(--f-mono); font-variant-numeric: tabular-nums; display: flex; flex-wrap: wrap; gap: 4px 6px; }
+.laps span { padding: 2px 7px; border-radius: 4px; background: var(--panel); border: 1px solid var(--line); }
+.laps span.bad { color: var(--warn); text-decoration: line-through; border-style: dashed; }
+.banner { font-size: .85rem; padding: 8px 12px; border-radius: 6px; border: 1px dashed var(--warn); color: var(--warn); display: flex; justify-content: space-between; gap: 10px; align-items: center; flex-wrap: wrap; }
+section { display: grid; gap: 12px; }
+.col { display: grid; gap: 12px; }
+details summary { cursor: pointer; font-weight: 600; font-size: .9rem; }
+details .note { margin-top: 8px; }
+[hidden] { display: none !important; }
+@media (max-width: 520px) { .readout > .cell:last-child:nth-child(odd) { grid-column: 1 / -1; } }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="disk" aria-hidden="true"></div>
+    <div>
+      <h1>จับเวลาจานมิเตอร์</h1>
+      <p>หาเวลาต่อ 1 รอบ (นาที) และพลังงานต่อ 1 รอบ (Wh) พร้อมชดเชย % ความคลาดเคลื่อน</p>
+    </div>
+  </header>
+
+  <section aria-labelledby="h-set">
+    <h2 id="h-set"><span class="step">ขั้น 1</span>ข้อมูลมิเตอร์และโหลด</h2>
+    <div class="grid">
+      <div class="field">
+        <label class="label" for="k">ค่าคงที่มิเตอร์ (rev/kWh)</label>
+        <input id="k" type="number" min="1" step="any" value="400">
+        <div class="chips" id="kChips"></div>
+        <small>ดูได้จากหน้าปัดมิเตอร์ เช่น “400 rev/kWh”</small>
+      </div>
+      <div class="field">
+        <label class="label" for="p">กำลังโหลดทดสอบ (W)</label>
+        <input id="p" type="number" min="0" step="any" value="1000">
+        <div class="inline">
+          <input id="v" type="number" step="any" placeholder="V" aria-label="แรงดัน (V)">
+          <input id="a" type="number" step="any" placeholder="A" aria-label="กระแส (A)">
+          <input id="pf" type="number" step="any" placeholder="PF" value="1" aria-label="ตัวประกอบกำลัง">
+          <button class="btn" id="vaCalc" type="button">คำนวณ W</button>
+        </div>
+        <small>W = V × A × PF (ใช้ค่าจากเครื่องวัดอ้างอิง)</small>
+      </div>
+      <div class="field">
+        <label class="label" for="err">% ความคลาดเคลื่อนที่ทราบ (ถ้ามี)</label>
+        <input id="err" type="number" step="any" value="0">
+        <small>บวก = มิเตอร์หมุนเร็ว/วัดเกิน · ลบ = หมุนช้า/วัดขาด</small>
+      </div>
+    </div>
+    <div class="readout" aria-live="polite">
+      <div class="cell key"><span class="label">เวลาต่อ 1 รอบ (ทฤษฎี)</span><span class="val" id="oMin">–</span><span class="sub" id="oSec">–</span></div>
+      <div class="cell key"><span class="label">พลังงานต่อ 1 รอบ</span><span class="val" id="oWh">–</span><span class="sub" id="oWhNom">–</span></div>
+      <div class="cell"><span class="label">รอบต่อนาที</span><span class="val" id="oRpm">–</span><span class="sub" id="oRpmSub">–</span></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-time">
+    <h2 id="h-time"><span class="step">ขั้น 2</span>จับเวลาแถบดำบนจาน</h2>
+    <div class="tabs" role="tablist">
+      <button class="tab" role="tab" id="t-video" aria-selected="true" aria-controls="p-video">วิดีโอ</button>
+      <button class="tab" role="tab" id="t-cam" aria-selected="false" aria-controls="p-video">กล้องสด</button>
+      <button class="tab" role="tab" id="t-tap" aria-selected="false" aria-controls="p-tap">กดจับเวลา</button>
+      <button class="tab" role="tab" id="t-man" aria-selected="false" aria-controls="p-man">พิมพ์เวลา</button>
+    </div>
+
+    <div id="p-video" role="tabpanel" class="col">
+      <div class="inline" id="videoCtl">
+        <label class="btn primary" for="file">ถ่าย/เลือกวิดีโอ</label>
+        <input id="file" class="sr" type="file" accept="video/*" capture="environment">
+        <label class="label" for="rate">ความเร็วเล่น</label>
+        <select id="rate" style="width:auto"><option value="1">1×</option><option value="0.5" selected>0.5×</option><option value="0.25">0.25×</option></select>
+      </div>
+      <div class="inline" id="camCtl" hidden>
+        <button class="btn primary" id="camStart" type="button">เปิดกล้อง</button>
+        <button class="btn" id="camStop" type="button" disabled>ปิดกล้อง</button>
+      </div>
+      <div class="stage" id="stage">
+        <div class="empty" id="stageEmpty">ถ่ายวิดีโอจานมิเตอร์ให้หมุนอย่างน้อย 5 รอบ แล้วเลือกไฟล์ที่นี่</div>
+        <video id="vid" playsinline muted hidden></video>
+        <canvas class="overlay" id="overlay" hidden></canvas>
+      </div>
+      <p class="note"><b>ลากกรอบเล็ก ๆ</b> บนภาพ ให้ครอบจุดเดียวบนขอบจานที่แถบดำวิ่งผ่าน (กว้างประมาณความกว้างของแถบดำ) แอปจะดูเฉพาะในกรอบ แถบดำ ตัวอักษร หรือเงานอกกรอบจะไม่ถูกนับ ถ้ามือหรือเงาบังทั้งกรอบ แอปจะข้ามช่วงนั้น และจุดที่มาเร็วผิดจังหวะจะถูกตัดทิ้ง</p>
+      <div class="inline">
+        <button class="btn primary" id="detStart" type="button" disabled>เริ่มตรวจจับ</button>
+        <button class="btn" id="detStop" type="button" disabled>หยุด</button>
+        <div class="status" id="detStatus"><span class="pill idle">ยังไม่ได้เลือกกรอบ</span></div>
+      </div>
+      <canvas class="spark" id="spark" aria-label="สัญญาณความมืดในกรอบ"></canvas>
+    </div>
+
+    <div id="p-tap" role="tabpanel" class="col" hidden>
+      <button class="tap" id="tapBtn" type="button">แตะทุกครั้งที่แถบดำผ่านจุดเดิม</button>
+      <p class="note">ความไวในการกดของคนอยู่ราว ±0.2 วินาทีต่อครั้ง ยิ่งจับหลายรอบ ค่าเฉลี่ยยิ่งแม่น ควรจับอย่างน้อย 5–10 รอบ</p>
+    </div>
+
+    <div id="p-man" role="tabpanel" class="col" hidden>
+      <div class="grid">
+        <div class="field"><label class="label" for="mT">เวลารวมที่จับได้ (วินาที)</label><input id="mT" type="number" step="any" min="0" placeholder="เช่น 60.3"></div>
+        <div class="field"><label class="label" for="mN">จำนวนรอบ</label><input id="mN" type="number" step="1" min="1" placeholder="เช่น 10"></div>
+        <div class="field"><label class="label" for="mU">ความไม่แน่นอนของนาฬิกา (± วินาที)</label><input id="mU" type="number" step="any" min="0" value="0.2"></div>
+      </div>
+      <div><button class="btn primary" id="mApply" type="button">ใช้ค่านี้</button></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="h-res">
+    <h2 id="h-res"><span class="step">ขั้น 3</span>ผลการวัด</h2>
+    <div class="banner" id="sampleBanner"><span>ตัวเลขด้านล่างคือข้อมูลตัวอย่าง ยังไม่ใช่ค่าที่วัดจริง</span><button class="btn" id="clearSample" type="button">ล้างแล้ววัดจริง</button></div>
+    <div class="readout" aria-live="polite">
+      <div class="cell key"><span class="label">เวลาต่อ 1 รอบ (วัดได้)</span><span class="val" id="rMin">–</span><span class="sub" id="rSec">–</span></div>
+      <div class="cell"><span class="label">กำลังไฟที่มิเตอร์วัดได้</span><span class="val" id="rW">–</span><span class="sub" id="rWsub">–</span></div>
+      <div class="cell"><span class="label">ความคลาดเคลื่อนมิเตอร์</span><span class="val" id="rErr">–</span><span class="sub" id="rErrSub">เทียบกับโหลดทดสอบ</span></div>
+      <div class="cell"><span class="label">พลังงานจริงต่อ 1 รอบ</span><span class="val" id="rWh">–</span><span class="sub" id="rWhSub">–</span></div>
+    </div>
+    <div class="status" id="resStatus"></div>
+    <div class="laps" id="laps"></div>
+    <div class="inline">
+      <label class="label" for="tol">ตัดรอบที่ต่างจากค่ากลางเกิน</label>
+      <select id="tol" style="width:auto"><option>10</option><option selected>15</option><option>25</option></select><span class="label">%</span>
+      <button class="btn" id="undo" type="button">ลบจุดล่าสุด</button>
+      <button class="btn" id="reset" type="button">ล้างทั้งหมด</button>
+    </div>
+    <details>
+      <summary>สูตรที่ใช้</summary>
+      <p class="note">Wh ต่อรอบ = 1000 ÷ K · เวลาต่อรอบ (วินาที) = 3,600,000 ÷ (K × W) · กำลังที่วัดได้ = 3,600,000 ÷ (K × วินาทีต่อรอบ) · ความคลาดเคลื่อน % = (เวลาทฤษฎี ÷ เวลาวัดได้ − 1) × 100 · เมื่อทราบความคลาดเคลื่อน e%: พลังงานจริงต่อรอบ = (1000 ÷ K) ÷ (1 + e/100) และเวลาต่อรอบที่คาดว่าจะเห็น = เวลาทฤษฎี ÷ (1 + e/100) · ช่วงความเชื่อมั่น 95% ใช้ค่า t ของ Student จากรอบที่ผ่านการกรอง</p>
+    </details>
+  </section>
+</div>
+
+<script>
+/*CORE*/
+</script>
+<script>
+(() => {
+  const M = MeterCore;
+  const $ = (id) => document.getElementById(id);
+  const num = (id) => { const x = parseFloat($(id).value); return Number.isFinite(x) ? x : NaN; };
+  const fmt = (x, d) => Number.isFinite(x) ? x.toLocaleString('th-TH', { minimumFractionDigits: d, maximumFractionDigits: d }) : '–';
+  const set = (id, html) => { $(id).innerHTML = html; };
+  const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+
+  // ---------- Step 1: theory ----------
+  const PRESETS = [30, 60, 150, 200, 400, 1200];
+  for (const k of PRESETS) {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'chip'; b.textContent = k; b.dataset.k = k;
+    b.onclick = () => { $('k').value = k; update(); };
+    $('kChips').append(b);
+  }
+  for (const id of ['k', 'p', 'err']) {
+    const saved = store.get('md.' + id); if (saved !== null) $(id).value = saved;
+    $(id).addEventListener('input', update);
+  }
+  $('vaCalc').onclick = () => {
+    const w = num('v') * num('a') * (Number.isFinite(num('pf')) ? num('pf') : 1);
+    if (Number.isFinite(w) && w > 0) { $('p').value = +w.toFixed(2); update(); }
+  };
+
+  function update() {
+    const k = num('k'), p = num('p'), e = Number.isFinite(num('err')) ? num('err') : 0;
+    for (const id of ['k', 'p', 'err']) store.set('md.' + id, $(id).value);
+    for (const c of $('kChips').children) c.setAttribute('aria-pressed', String(+c.dataset.k === k));
+    const okK = k > 0, okP = p > 0;
+    const wh = okK ? M.correctedWhPerRev(k, e) : NaN;
+    set('oWh', okK ? `${fmt(wh, 4)}<span class="u">Wh</span>` : '–');
+    set('oWhNom', okK ? (e ? `ตามป้าย ${fmt(M.whPerRev(k), 4)} Wh · ชดเชย ${fmt(e, 2)}%` : `= 1000 ÷ ${fmt(k, 0)}`) : 'ใส่ค่าคงที่มิเตอร์');
+    if (okK && okP) {
+      const s = M.correctedSecPerRev(k, p, e);
+      set('oMin', `${fmt(s / 60, 4)}<span class="u">นาที</span>`);
+      set('oSec', `${fmt(s, 2)} วินาที${e ? ` · ไม่ชดเชย ${fmt(M.expectedSecPerRev(k, p), 2)} วินาที` : ''}`);
+      set('oRpm', `${fmt(60 / s, 3)}<span class="u">rpm</span>`);
+      set('oRpmSub', `ที่ ${fmt(p, 0)} W`);
+    } else {
+      set('oMin', '–'); set('oSec', 'ใส่กำลังโหลด'); set('oRpm', '–'); set('oRpmSub', '–');
+    }
+    renderResults();
+  }
+
+  // ---------- Measurements ----------
+  let marks = [0, 9.03, 18.07, 27.0, 28.6, 36.06, 45.07, 54.04]; // sample at 400 rev/kWh, 1000 W: 28.6 is a false trigger
+  let manual = null; // {T, N, U}
+  let isSample = true;
+  const tolEl = $('tol');
+  tolEl.onchange = renderResults;
+
+  function clearAll() { marks = []; manual = null; isSample = false; $('sampleBanner').hidden = true; renderResults(); }
+  $('clearSample').onclick = clearAll;
+  $('reset').onclick = clearAll;
+  $('undo').onclick = () => { if (isSample) return clearAll(); marks.pop(); renderResults(); };
+  function addMark(t) {
+    if (isSample) clearAll();
+    manual = null; marks.push(t); renderResults();
+  }
+
+  function renderResults() {
+    const k = num('k'), p = num('p'), e = Number.isFinite(num('err')) ? num('err') : 0;
+    let mean = NaN, ci = NaN, n = 0, info = [];
+    const lapsEl = $('laps'); lapsEl.textContent = '';
+    if (manual) {
+      mean = manual.T / manual.N; n = manual.N;
+      ci = (Math.SQRT2 * manual.U) / manual.N; // start + stop reaction error
+      info.push(`<span class="pill idle">จากเวลารวม ${fmt(manual.T, 2)} วินาที / ${manual.N} รอบ</span>`);
+    } else {
+      const s = M.lapStats(marks, { tolerancePct: +tolEl.value });
+      mean = s.mean; ci = s.ci95; n = s.n;
+      const bad = new Set(s.rejected.map((r) => r.t));
+      const ts = [...marks].sort((a, b) => a - b);
+      let last = ts[0];
+      for (let i = 1; i < ts.length; i++) {
+        const sp = document.createElement('span');
+        sp.textContent = fmt(ts[i] - last, 2);
+        lapsEl.append(sp);
+        if (bad.has(ts[i])) {
+          sp.className = 'bad'; sp.title = 'ตัดออก: ต่างจากค่ากลางมากเกินไป';
+          if (s.rejected.find((r) => r.t === ts[i]).reason === 'early') continue;
+        }
+        last = ts[i];
+      }
+      info.push(`<span class="pill ${n >= 5 ? 'ok' : n ? 'warn' : 'idle'}">${n} รอบที่ใช้คำนวณ${n && n < 5 ? ' · ควรมีอย่างน้อย 5' : ''}</span>`);
+      if (s.rejected.length) info.push(`<span class="pill warn">ตัดออก ${s.rejected.length} จุด</span>`);
+      if (Number.isFinite(s.relPct)) info.push(`<span class="pill ${s.relPct <= 1 ? 'ok' : 'warn'}">ความไม่แน่นอน ±${fmt(s.relPct, 2)}%</span>`);
+    }
+    set('resStatus', info.join(''));
+    if (!(mean > 0)) { for (const id of ['rMin', 'rW', 'rErr', 'rWh']) set(id, '–'); set('rSec', 'ยังไม่มีข้อมูล'); set('rWsub', '–'); set('rWhSub', '–'); return; }
+    const ciTxt = Number.isFinite(ci) ? ` ± ${fmt(ci, 2)}` : '';
+    set('rMin', `${fmt(mean / 60, 4)}<span class="u">นาที</span>`);
+    set('rSec', `${fmt(mean, 3)}${ciTxt} วินาที (95%)`);
+    if (k > 0) {
+      const w = M.powerFromSecPerRev(k, mean);
+      set('rW', `${fmt(w, 1)}<span class="u">W</span>`);
+      set('rWsub', Number.isFinite(ci) ? `ช่วง ${fmt(M.powerFromSecPerRev(k, mean + ci), 1)} – ${fmt(M.powerFromSecPerRev(k, mean - ci), 1)} W` : '–');
+    }
+    if (k > 0 && p > 0) {
+      const exp = M.expectedSecPerRev(k, p);
+      const err = M.meterErrorPct(mean, exp);
+      const errCi = Number.isFinite(ci) ? (exp / (mean - ci) - exp / (mean + ci)) / 2 * 100 : NaN;
+      set('rErr', `${err >= 0 ? '+' : ''}${fmt(err, 2)}<span class="u">%</span>`);
+      set('rErrSub', `${Number.isFinite(errCi) ? `± ${fmt(errCi, 2)}% · ` : ''}เทียบโหลด ${fmt(p, 0)} W`);
+      const whTrue = M.correctedWhPerRev(k, err);
+      set('rWh', `${fmt(whTrue, 4)}<span class="u">Wh</span>`);
+      set('rWhSub', `ตามป้าย ${fmt(M.whPerRev(k), 4)} Wh`);
+    } else {
+      set('rErr', '–'); set('rErrSub', 'ใส่กำลังโหลดเพื่อเทียบ');
+      set('rWh', k > 0 ? `${fmt(M.correctedWhPerRev(k, e), 4)}<span class="u">Wh</span>` : '–');
+      set('rWhSub', e ? `ชดเชย ${fmt(e, 2)}%` : 'ตามป้าย');
+    }
+  }
+
+  // ---------- Tabs ----------
+  const tabs = ['t-video', 't-cam', 't-tap', 't-man'];
+  let mode = 'video';
+  for (const id of tabs) $(id).onclick = () => {
+    for (const t of tabs) $(t).setAttribute('aria-selected', String(t === id));
+    mode = id.slice(2);
+    $('p-video').hidden = !(mode === 'video' || mode === 'cam');
+    $('p-tap').hidden = mode !== 'tap';
+    $('p-man').hidden = mode !== 'man';
+    $('videoCtl').hidden = mode !== 'video';
+    $('camCtl').hidden = mode !== 'cam';
+    if (mode !== 'cam') stopCam();
+    if (mode !== 'video' && vid.src && !vid.srcObject) vid.pause();
+    stopDetect();
+    if (mode === 'cam' && !vid.srcObject) showEmpty('กดเปิดกล้อง แล้วถือโทรศัพท์นิ่ง ๆ ให้เห็นจานมิเตอร์');
+    if (mode === 'video' && !vid.src) showEmpty('ถ่ายวิดีโอจานมิเตอร์ให้หมุนอย่างน้อย 5 รอบ แล้วเลือกไฟล์ที่นี่');
+  };
+
+  // ---------- Tap / manual ----------
+  $('tapBtn').addEventListener('pointerdown', (ev) => { ev.preventDefault(); addMark(performance.now() / 1000); });
+  $('mApply').onclick = () => {
+    const T = num('mT'), N = Math.round(num('mN')), U = num('mU') || 0;
+    if (!(T > 0 && N >= 1)) { set('resStatus', '<span class="pill warn">ใส่เวลารวมและจำนวนรอบให้ครบ</span>'); return; }
+    if (isSample) clearAll();
+    manual = { T, N, U }; marks = []; renderResults();
+  };
+
+  // ---------- Video / camera + region of interest ----------
+  const vid = $('vid'), ov = $('overlay'), octx = ov.getContext('2d');
+  const sample = document.createElement('canvas'), sctx = sample.getContext('2d', { willReadFrequently: true });
+  let roi = null, drag = null, stream = null;
+
+  function showEmpty(msg) { $('stageEmpty').textContent = msg; $('stageEmpty').hidden = false; vid.hidden = true; ov.hidden = true; }
+  function showVideo() { $('stageEmpty').hidden = true; vid.hidden = false; ov.hidden = false; requestAnimationFrame(drawOverlay); }
+
+  $('file').onchange = () => {
+    const f = $('file').files[0]; if (!f) return;
+    stopDetect();
+    if (vid.src) URL.revokeObjectURL(vid.src);
+    vid.srcObject = null; vid.src = URL.createObjectURL(f); vid.controls = false;
+    vid.onloadeddata = () => { vid.currentTime = 0; showVideo(); setRoiStatus(); };
+  };
+  $('camStart').onclick = async () => {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', frameRate: { ideal: 60 } }, audio: false });
+      vid.removeAttribute('src'); vid.srcObject = stream; await vid.play();
+      showVideo(); setRoiStatus();
+      $('camStart').disabled = true; $('camStop').disabled = false;
+    } catch (err) {
+      showEmpty('เปิดกล้องในหน้านี้ไม่ได้ (เบราว์เซอร์หรือหน้าเว็บไม่อนุญาต) ให้ใช้แท็บ “วิดีโอ” ถ่ายวิดีโอแล้วเลือกไฟล์แทน ผลแม่นเท่ากัน');
+    }
+  };
+  $('camStop').onclick = stopCam;
+  function stopCam() {
+    if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; vid.srcObject = null; }
+    $('camStart').disabled = false; $('camStop').disabled = true;
+    if (mode === 'cam') showEmpty('กดเปิดกล้อง แล้วถือโทรศัพท์นิ่ง ๆ ให้เห็นจานมิเตอร์');
+  }
+
+  const pt = (ev) => { const r = ov.getBoundingClientRect(); return [Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)), Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height))]; };
+  ov.addEventListener('pointerdown', (ev) => { ov.setPointerCapture(ev.pointerId); drag = pt(ev); roi = null; });
+  ov.addEventListener('pointermove', (ev) => {
+    if (!drag) return; const [x, y] = pt(ev);
+    roi = { x: Math.min(drag[0], x), y: Math.min(drag[1], y), w: Math.abs(x - drag[0]), h: Math.abs(y - drag[1]) };
+    drawOverlay();
+  });
+  ov.addEventListener('pointerup', () => { drag = null; if (roi && (roi.w < 0.02 || roi.h < 0.02)) roi = null; drawOverlay(); setRoiStatus(); if (detector) detector.reset(); });
+
+  function setRoiStatus() {
+    const has = !!roi && !vid.hidden;
+    $('detStart').disabled = !has || running;
+    if (!running) set('detStatus', has ? '<span class="pill ok">เลือกกรอบแล้ว พร้อมตรวจจับ</span>' : '<span class="pill idle">ลากกรอบบนภาพก่อน</span>');
+  }
+
+  function drawOverlay(flash) {
+    const r = ov.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    if (ov.width !== Math.round(r.width * dpr)) { ov.width = Math.round(r.width * dpr); ov.height = Math.round(r.height * dpr); }
+    octx.clearRect(0, 0, ov.width, ov.height);
+    if (!roi) return;
+    const x = roi.x * ov.width, y = roi.y * ov.height, w = roi.w * ov.width, h = roi.h * ov.height;
+    octx.fillStyle = 'rgba(0,0,0,.45)';
+    octx.fillRect(0, 0, ov.width, y); octx.fillRect(0, y + h, ov.width, ov.height - y - h);
+    octx.fillRect(0, y, x, h); octx.fillRect(x + w, y, ov.width - x - w, h);
+    octx.lineWidth = 2 * dpr; octx.strokeStyle = flash ? '#ff6a4d' : '#ffffff';
+    octx.strokeRect(x, y, w, h);
+    if (flash) { octx.fillStyle = 'rgba(255,106,77,.35)'; octx.fillRect(x, y, w, h); }
+  }
+
+  // ---------- Detection loop ----------
+  let detector = null, running = false, history = [], hitsAt = [], flashUntil = 0, lastT = null, t0 = null;
+  $('detStart').onclick = startDetect;
+  $('detStop').onclick = stopDetect;
+
+  function startDetect() {
+    if (!roi) return;
+    if (isSample) clearAll();
+    marks = []; manual = null; history = []; hitsAt = []; lastT = null; t0 = null; renderResults();
+    detector = M.createDetector({ minGapSec: 0.4 });
+    running = true;
+    $('detStart').disabled = true; $('detStop').disabled = false;
+    set('detStatus', '<span class="pill hot">รอแถบดำผ่านครั้งแรกเพื่อปรับระดับ…</span>');
+    if (!vid.srcObject) { vid.currentTime = 0; vid.playbackRate = +$('rate').value; vid.play(); vid.onended = stopDetect; }
+    schedule();
+  }
+  function stopDetect() {
+    if (!running) return;
+    running = false;
+    if (!vid.srcObject) vid.pause();
+    $('detStop').disabled = true;
+    setRoiStatus();
+    const n = Math.max(0, marks.length - 1);
+    set('detStatus', `<span class="pill ${n >= 5 ? 'ok' : 'warn'}">หยุดแล้ว · จับได้ ${marks.length} ครั้ง (${n} รอบ)</span>`);
+  }
+  function schedule() {
+    if (!running) return;
+    if ('requestVideoFrameCallback' in vid) vid.requestVideoFrameCallback(onFrame);
+    else requestAnimationFrame(() => onFrame(performance.now(), null));
+  }
+  function onFrame(now, meta) {
+    if (!running) return;
+    // Video files: use the media timeline (exact, independent of playback speed). Camera: capture clock.
+    let t = vid.srcObject ? (meta && meta.captureTime ? meta.captureTime : now) / 1000 : (meta ? meta.mediaTime : vid.currentTime);
+    if (t0 === null) t0 = t;
+    t -= t0;
+    if (lastT !== null && t <= lastT) return schedule();
+    lastT = t;
+    const vw = vid.videoWidth, vh = vid.videoHeight;
+    const sx = roi.x * vw, sy = roi.y * vh, sw = Math.max(1, roi.w * vw), sh = Math.max(1, roi.h * vh);
+    const scale = Math.min(1, 96 / Math.max(sw, sh));
+    sample.width = Math.max(1, Math.round(sw * scale)); sample.height = Math.max(1, Math.round(sh * scale));
+    sctx.drawImage(vid, sx, sy, sw, sh, 0, 0, sample.width, sample.height);
+    const v = M.darkFraction(sctx.getImageData(0, 0, sample.width, sample.height).data);
+    const wasArmed = detector.armed;
+    const hit = detector.feed(t, v);
+    if (!wasArmed && detector.armed) set('detStatus', '<span class="pill hot">เรียนรู้แถบดำแล้ว · เริ่มนับรอบ</span>');
+    history.push([t, v]); while (history.length && history[0][0] < t - 12) history.shift();
+    if (hit) { hitsAt.push(t); addMarkRaw(t); flashUntil = performance.now() + 150; }
+    drawOverlay(performance.now() < flashUntil);
+    drawSpark(v >= 0.85);
+    schedule();
+  }
+  function addMarkRaw(t) {
+    marks.push(t); renderResults();
+    set('detStatus', `<span class="pill hot">กำลังตรวจจับ · ${marks.length} ครั้ง</span>`);
+  }
+
+  // ---------- Signal sparkline ----------
+  const sp = $('spark'), spx = sp.getContext('2d');
+  function drawSpark(occluded) {
+    const r = sp.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+    sp.width = Math.round(r.width * dpr); sp.height = Math.round(r.height * dpr);
+    const css = getComputedStyle(document.documentElement);
+    const W = sp.width, H = sp.height, pad = 6 * dpr;
+    spx.clearRect(0, 0, W, H);
+    if (history.length < 2) return;
+    const tEnd = history[history.length - 1][0], tStart = tEnd - 12;
+    const X = (t) => ((t - tStart) / 12) * W;
+    const Y = (v) => H - pad - Math.min(1, v) * (H - 2 * pad);
+    spx.strokeStyle = css.getPropertyValue('--accent').trim(); spx.lineWidth = 1 * dpr;
+    for (const t of hitsAt) if (t >= tStart) { spx.beginPath(); spx.moveTo(X(t), 0); spx.lineTo(X(t), H); spx.stroke(); }
+    spx.strokeStyle = css.getPropertyValue('--signal').trim(); spx.lineWidth = 1.5 * dpr;
+    spx.beginPath();
+    history.forEach(([t, v], i) => (i ? spx.lineTo(X(t), Y(v)) : spx.moveTo(X(t), Y(v))));
+    spx.stroke();
+    if (occluded) { spx.fillStyle = css.getPropertyValue('--warn').trim(); spx.font = `${11 * dpr}px sans-serif`; spx.fillText('ถูกบัง: ข้ามช่วงนี้', pad, 14 * dpr); }
+  }
+
+  window.addEventListener('resize', () => drawOverlay());
+  update();
+})();
+</script>
