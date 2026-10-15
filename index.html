@@ -350,8 +350,10 @@ if (typeof module !== 'undefined') module.exports = MeterCore;
     b.onclick = () => { $('k').value = k; update(); };
     $('kChips').append(b);
   }
+  // v2: drop values remembered by the old version (old meter-constant presets).
+  try { for (const id of ['k', 'p', 'err']) localStorage.removeItem('md.' + id); } catch {}
   for (const id of ['k', 'p', 'err']) {
-    const saved = store.get('md.' + id); if (saved !== null) $(id).value = saved;
+    const saved = store.get('md2.' + id); if (saved !== null) $(id).value = saved;
     $(id).addEventListener('input', update);
   }
   $('vaCalc').onclick = () => {
@@ -361,7 +363,7 @@ if (typeof module !== 'undefined') module.exports = MeterCore;
 
   function update() {
     const k = num('k'), p = num('p'), e = Number.isFinite(num('err')) ? num('err') : 0;
-    for (const id of ['k', 'p', 'err']) store.set('md.' + id, $(id).value);
+    for (const id of ['k', 'p', 'err']) store.set('md2.' + id, $(id).value);
     for (const c of $('kChips').children) c.setAttribute('aria-pressed', String(+c.dataset.k === k));
     const okK = k > 0, okP = p > 0;
     const wh = okK ? M.correctedWhPerRev(k, e) : NaN;
