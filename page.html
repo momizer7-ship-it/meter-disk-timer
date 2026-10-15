@@ -97,6 +97,9 @@ input[type=number], select { padding: 11px 12px; font-size: 16px; }
 .act.tapmode:active { transform: scale(.96); filter: brightness(1.15); }
 .wrap { padding-bottom: calc(110px + env(safe-area-inset-bottom, 0px)); }
 @media (max-width: 520px) { .readout > .cell:last-child:nth-child(odd) { grid-column: 1 / -1; } }
+.check { display: flex; gap: 10px; align-items: flex-start; font-size: .88rem; color: var(--muted); cursor: pointer; }
+.check input { width: 22px; height: 22px; flex: none; accent-color: var(--accent); margin: 0; }
+#detNote { color: var(--warn); margin: 0; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>
 
@@ -172,6 +175,8 @@ input[type=number], select { padding: 11px 12px; font-size: 16px; }
       </div>
       <p class="note"><b>แตะบนภาพ</b>ตรงจุดบนขอบจานที่แถบดำวิ่งผ่าน แอปจะวางกรอบเล็กให้ (หรือลากนิ้วเพื่อวาดกรอบเอง ให้กว้างประมาณแถบดำ) แอปจะดูเฉพาะในกรอบ แถบดำ ตัวอักษร หรือเงานอกกรอบจะไม่ถูกนับ ถ้ามือหรือเงาบังทั้งกรอบ แอปจะข้ามช่วงนั้น และจุดที่มาเร็วผิดจังหวะจะถูกตัดทิ้ง</p>
       <div class="status" id="detStatus"><span class="pill idle">ยังไม่ได้เลือกกรอบ</span></div>
+      <p class="note" id="detNote" hidden></p>
+      <label class="check" for="useTheory"><input type="checkbox" id="useTheory" checked> ไม่นับแถบดำที่มาเร็วกว่าครึ่งของเวลาทฤษฎี (ต้องใส่ค่าคงที่และ W ให้ถูก)</label>
       <canvas class="spark" id="spark" aria-label="สัญญาณความมืดในกรอบ"></canvas>
     </div>
 
@@ -309,16 +314,16 @@ input[type=number], select { padding: 11px 12px; font-size: 16px; }
       mean = s.mean; ci = s.ci95; n = s.n;
       const bad = new Set(s.rejected.map((r) => r.t));
       const ts = [...marks].sort((a, b) => a - b);
-      let last = ts[0];
-      for (let i = 1; i < ts.length; i++) {
-        const sp = document.createElement('span');
-        sp.textContent = fmt(ts[i] - last, 2);
-        lapsEl.append(sp);
-        if (bad.has(ts[i])) {
-          sp.className = 'bad'; sp.title = 'ตัดออก: ต่างจากค่ากลางมากเกินไป';
-          if (s.rejected.find((r) => r.t === ts[i]).reason === 'early') continue;
+      let last = null;
+      for (const t of ts) {
+        const isBad = bad.has(t);
+        if (last !== null) {
+          const sp = document.createElement('span');
+          sp.textContent = fmt(t - last, 2);
+          if (isBad) { sp.className = 'bad'; sp.title = 'ตัดออก: ต่างจากค่ากลางมากเกินไป'; }
+          lapsEl.append(sp);
         }
-        last = ts[i];
+        if (!isBad || s.rejected.find((r) => r.t === t).reason === 'long') last = t;
       }
       info.push(`<span class="pill ${n >= 5 ? 'ok' : n ? 'warn' : 'idle'}">${n} รอบที่ใช้คำนวณ${n && n < 5 ? ' · ควรมีอย่างน้อย 5' : ''}</span>`);
       if (s.rejected.length) info.push(`<span class="pill warn">ตัดออก ${s.rejected.length} จุด</span>`);
@@ -481,7 +486,7 @@ input[type=number], select { padding: 11px 12px; font-size: 16px; }
       const w = 0.07, h = Math.min(0.2, w * ov.clientWidth / Math.max(1, ov.clientHeight));
       roi = { x: Math.min(1 - w, Math.max(0, x - w / 2)), y: Math.min(1 - h, Math.max(0, y - h / 2)), w, h };
     }
-    drawOverlay(); setRoiStatus(); if (detector) detector.reset();
+    drawOverlay(); setRoiStatus(); if (detector) detector.reset(); if (analyzer) analyzer.reset();
   });
 
   function setRoiStatus() {
@@ -506,12 +511,34 @@ input[type=number], select { padding: 11px 12px; font-size: 16px; }
   }
 
   // ---------- Detection loop ----------
-  let detector = null, running = false, history = [], hitsAt = [], flashUntil = 0, lastT = null, t0 = null;
+  let detector = null, analyzer = null, running = false, history = [], hitsAt = [], flashUntil = 0, lastT = null, t0 = null;
+  let expected = 0, shakeFrames = 0, frames = 0;
+  // Draw part of the current frame (normalised rect) small, return its luma.
+  function grab(r, maxPx) {
+    const vw = vid.videoWidth, vh = vid.videoHeight;
+    const sx = r.x * vw, sy = r.y * vh, sw = Math.max(1, r.w * vw), sh = Math.max(1, r.h * vh);
+    const scale = Math.min(1, maxPx / Math.max(sw, sh));
+    sample.width = Math.max(1, Math.round(sw * scale)); sample.height = Math.max(1, Math.round(sh * scale));
+    sctx.drawImage(vid, sx, sy, sw, sh, 0, 0, sample.width, sample.height);
+    return M.luma(sctx.getImageData(0, 0, sample.width, sample.height).data);
+  }
+  // Area three times the box around it, used to cancel exposure changes.
+  function contextRect(r) {
+    const w = Math.min(1, r.w * 3), h = Math.min(1, r.h * 3);
+    const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
+    return { x: Math.min(1 - w, Math.max(0, cx - w / 2)), y: Math.min(1 - h, Math.max(0, cy - h / 2)), w, h };
+  }
   function startDetect() {
     if (!roi) return;
     if (isSample) clearAll();
     marks = []; markSource = 'detect'; manual = null; history = []; hitsAt = []; lastT = null; t0 = null; renderResults();
-    detector = M.createDetector({ minGapSec: 0.4 });
+    $('detNote').hidden = true;
+    const k = num('k'), p = num('p');
+    expected = $('useTheory').checked && k > 0 && p > 0 ? M.expectedSecPerRev(k, p) : 0;
+    // occlusion: Infinity — the new signal may legitimately reach 1 when the mark fills the box.
+    detector = M.createDetector({ minGapSec: 0.4, occlusion: Infinity, expectedSec: expected });
+    analyzer = M.createRoiAnalyzer();
+    shakeFrames = 0; frames = 0;
     running = true;
     keepAwake(true);
     refreshDock();
@@ -540,21 +567,23 @@ input[type=number], select { padding: 11px 12px; font-size: 16px; }
     t -= t0;
     if (lastT !== null && t <= lastT) return schedule();
     lastT = t;
-    const vw = vid.videoWidth, vh = vid.videoHeight;
-    const sx = roi.x * vw, sy = roi.y * vh, sw = Math.max(1, roi.w * vw), sh = Math.max(1, roi.h * vh);
-    const scale = Math.min(1, 96 / Math.max(sw, sh));
-    sample.width = Math.max(1, Math.round(sw * scale)); sample.height = Math.max(1, Math.round(sh * scale));
-    sctx.drawImage(vid, sx, sy, sw, sh, 0, 0, sample.width, sample.height);
-    const v = M.darkFraction(sctx.getImageData(0, 0, sample.width, sample.height).data);
-    const wasArmed = detector.armed;
-    const hit = detector.feed(t, v);
+    const ctxLuma = grab(contextRect(roi), 48);
+    const roiLuma = grab(roi, 48);
+    const a = analyzer.feed(t, roiLuma, ctxLuma);
+    const v = a.dark;
+    frames++; if (a.motion) shakeFrames++;
+    const wasArmed = detector.armed, wasRejected = detector.rejectedEarly;
+    const hit = detector.feed(t, v, a.motion);
     if (!wasArmed && detector.armed) set('detStatus', '<span class="pill hot">เรียนรู้แถบดำแล้ว · เริ่มนับรอบ</span>');
+    if (detector.rejectedEarly > wasRejected) setNote(`ตัดสัญญาณที่มาเร็วกว่าครึ่งรอบ ${detector.rejectedEarly} ครั้ง`);
+    else if (a.motion && frames > 30 && shakeFrames / frames > 0.05) setNote('กล้องสั่น: ถือให้นิ่ง หรือพิงมือถือกับตู้มิเตอร์');
     history.push([t, v]); while (history.length && history[0][0] < t - 12) history.shift();
     if (hit) { hitsAt.push(t); addMarkRaw(t); flashUntil = performance.now() + 150; }
     drawOverlay(performance.now() < flashUntil);
-    drawSpark(v >= 0.85);
+    drawSpark(a.motion);
     schedule();
   }
+  function setNote(text) { $('detNote').textContent = text; $('detNote').hidden = false; }
   function addMarkRaw(t) {
     marks.push(t); renderResults(); buzz();
     set('detStatus', `<span class="pill hot">กำลังตรวจจับ · ${marks.length} ครั้ง</span>`);
@@ -578,7 +607,7 @@ input[type=number], select { padding: 11px 12px; font-size: 16px; }
     spx.beginPath();
     history.forEach(([t, v], i) => (i ? spx.lineTo(X(t), Y(v)) : spx.moveTo(X(t), Y(v))));
     spx.stroke();
-    if (occluded) { spx.fillStyle = css.getPropertyValue('--warn').trim(); spx.font = `${11 * dpr}px sans-serif`; spx.fillText('ถูกบัง: ข้ามช่วงนี้', pad, 14 * dpr); }
+    if (occluded) { spx.fillStyle = css.getPropertyValue('--warn').trim(); spx.font = `${11 * dpr}px sans-serif`; spx.fillText('ภาพขยับ: ข้ามช่วงนี้', pad, 14 * dpr); }
   }
 
   window.addEventListener('resize', () => drawOverlay());

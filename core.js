@@ -32,16 +32,27 @@ const MeterCore = (() => {
     const ref = median(raw);
     const lo = ref * (1 - tolerancePct / 100);
     const hi = ref * (1 + tolerancePct / 100);
-    const laps = [];
-    const rejected = [];
-    let last = ts[0];
-    for (let i = 1; i < ts.length; i++) {
-      const gap = ts[i] - last;
-      if (gap < lo) { rejected.push({ t: ts[i], reason: 'early' }); continue; }
-      if (gap > hi) rejected.push({ t: ts[i], reason: 'long' });
-      else laps.push(gap);
-      last = ts[i];
+    // Walk the marks from a given start; marks before the start count as false.
+    const walk = (start) => {
+      const laps = [];
+      const rejected = ts.slice(0, start).map((t) => ({ t, reason: 'early' }));
+      let last = ts[start];
+      for (let i = start + 1; i < ts.length; i++) {
+        const gap = ts[i] - last;
+        if (gap < lo) { rejected.push({ t: ts[i], reason: 'early' }); continue; }
+        if (gap > hi) rejected.push({ t: ts[i], reason: 'long' });
+        else laps.push(gap);
+        last = ts[i];
+      }
+      return { laps, rejected };
+    };
+    // The first mark may itself be false: try the first few as the start, keep the most laps.
+    let best = walk(0);
+    for (let s = 1; s < Math.min(3, ts.length - 1); s++) {
+      const w = walk(s);
+      if (w.laps.length > best.laps.length) best = w;
     }
+    const { laps, rejected } = best;
     const n = laps.length;
     if (!n) return { ...empty, rejected };
     const mean = laps.reduce((a, b) => a + b, 0) / n;
@@ -55,7 +66,7 @@ const MeterCore = (() => {
   // own brightness. Fires once on each rising edge of the black mark.
   function createDetector({
     windowSec = 15, minContrast = 0.03, onLevel = 0.6, offLevel = 0.35,
-    minGapSec = 0.4, occlusion = 0.85, minOffFrames = 3,
+    minGapSec = 0.4, occlusion = 0.85, minOffFrames = 3, expectedSec = 0,
   } = {}) {
     let samples = [];
     let active = false;
@@ -66,8 +77,10 @@ const MeterCore = (() => {
     const hits = [];
     return {
       get armed() { return armed; },
-      feed(t, v) {
-        if (v >= occlusion) { active = true; prev = null; return null; } // hand/shadow over whole window
+      rejectedEarly: 0,
+      // skip = true for frames the caller knows are unusable (camera shake).
+      feed(t, v, skip = false) {
+        if (skip || v >= occlusion) { active = true; prev = null; return null; } // shake, or hand/shadow over whole window
         const before = prev;
         prev = [t, v];
         samples.push([t, v]);
@@ -92,8 +105,10 @@ const MeterCore = (() => {
         }
         const recent = [];
         for (let i = Math.max(1, hits.length - 5); i < hits.length; i++) recent.push(hits[i] - hits[i - 1]);
-        const gap = Math.max(minGapSec, recent.length >= 2 ? 0.5 * median(recent) : 0);
-        if (tc - lastHit < gap) return null;
+        // Real marks cannot come much faster than one revolution: half the measured
+        // lap, and half the theoretical lap when the meter constant and load are known.
+        const gap = Math.max(minGapSec, recent.length >= 2 ? 0.5 * median(recent) : 0, 0.5 * expectedSec);
+        if (tc - lastHit < gap) { this.rejectedEarly++; return null; }
         lastHit = tc;
         hits.push(tc);
         return { t: tc, ...state };
@@ -119,9 +134,63 @@ const MeterCore = (() => {
     return dark / n;
   }
 
+  // Compares each frame of the box with a learned picture of the box, so only
+  // darkness that is NEW counts (the moving mark). Dark things that sit still in
+  // the box (housing gaps, digits) are part of the background and never count.
+  // roi, ctx: luma arrays of the box and of a wider area around it. Dividing by the
+  // wider area's mean cancels camera exposure changes. If many pixels get brighter
+  // at once, the picture moved (shake): report motion and re-learn the background.
+  function createRoiAnalyzer({
+    darkRatio = 0.6, brightRatio = 1.6, darkenTau = 30, brightenTau = 0.3, motionFrac = 0.12, ctxMotionFrac = 0.04,
+  } = {}) {
+    let bg = null, bgCtx = null, lastT = 0;
+    const norm = (px, cm) => { const out = new Float32Array(px.length); for (let i = 0; i < px.length; i++) out[i] = px[i] / cm; return out; };
+    // Fractions of pixels darker / brighter than the background; then let the background follow.
+    function compare(cur, ref, up, down, learn) {
+      let dark = 0, bright = 0;
+      for (let i = 0; i < cur.length; i++) {
+        if (cur[i] < ref[i] * darkRatio) dark++;
+        else if (cur[i] > ref[i] * brightRatio) bright++;
+      }
+      if (learn) for (let i = 0; i < cur.length; i++) ref[i] += (cur[i] > ref[i] ? up : down) * (cur[i] - ref[i]);
+      return [dark / cur.length, bright / cur.length];
+    }
+    return {
+      feed(t, roi, ctx) {
+        let s = 0;
+        for (let i = 0; i < ctx.length; i++) s += ctx[i];
+        const cm = Math.max(1, s / ctx.length);
+        const cur = norm(roi, cm), curCtx = norm(ctx, cm);
+        if (!bg || bg.length !== cur.length || bgCtx.length !== curCtx.length) {
+          bg = cur; bgCtx = curCtx; lastT = t;
+          return { dark: 0, bright: 0, motion: false };
+        }
+        const dt = Math.max(0, t - lastT); lastT = t;
+        const up = 1 - Math.exp(-dt / brightenTau), down = 1 - Math.exp(-dt / darkenTau);
+        // Something that was dark moved away = the picture moved. Checked in the box and in
+        // the wider area, so a dark edge pushed INTO the box by shake is caught too.
+        const [, ctxBright] = compare(curCtx, bgCtx, up, down, false);
+        const [D, B] = compare(cur, bg, up, down, false);
+        const motion = B >= motionFrac || ctxBright >= ctxMotionFrac;
+        if (motion) { bg = cur; bgCtx = curCtx; }
+        else { compare(curCtx, bgCtx, up, down, true); compare(cur, bg, up, down, true); }
+        return { dark: D, bright: B, motion };
+      },
+      reset() { bg = null; bgCtx = null; },
+    };
+  }
+
+  // RGBA bytes -> luma array.
+  function luma(rgba) {
+    const n = rgba.length / 4, out = new Float32Array(n);
+    for (let i = 0, j = 0; j < n; i += 4, j++) out[j] = 0.299 * rgba[i] + 0.587 * rgba[i + 1] + 0.114 * rgba[i + 2];
+    return out;
+  }
+
   return {
     whPerRev, expectedSecPerRev, powerFromSecPerRev, meterErrorPct,
     correctedWhPerRev, correctedSecPerRev, lapStats, createDetector, darkFraction, median,
+    createRoiAnalyzer, luma,
   };
 })();
 if (typeof module !== 'undefined') module.exports = MeterCore;
